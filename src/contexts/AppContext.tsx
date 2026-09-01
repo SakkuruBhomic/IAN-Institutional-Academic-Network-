@@ -10,6 +10,7 @@ import {
 import { authenticateOfficial, type OfficialRole } from '../data/officialAccounts'
 import { authenticateStudent } from '../data/studentAccounts'
 import { initialNotifications, roleConfig, seedUsers } from '../data/mockData'
+import { isSupabaseConfigured, supabase } from '../lib/supabaseClient'
 import type { ApprovalRequest, AttachmentItem, NotificationItem, Role, UserProfile } from '../types'
 
 interface AppContextValue {
@@ -24,7 +25,7 @@ interface AppContextValue {
   setCurrentRole: (role: Role) => void
   setPassword: (rollNo: string, password: string) => { ok: boolean; message: string }
   updateUserProfile: (updates: Partial<UserProfile>) => void
-  addRequest: (request: ApprovalRequest) => void
+  addRequest: (request: ApprovalRequest) => Promise<{ ok: boolean; message?: string }>
   updateRequest: (requestId: string, updater: (request: ApprovalRequest) => ApprovalRequest) => void
   addAttachmentToRequest: (requestId: string, attachment: AttachmentItem) => void
   removeAttachmentFromRequest: (requestId: string, attachmentId: string) => void
@@ -39,7 +40,7 @@ const NOTIFICATIONS_KEY = 'ian-notifications-v2'
 
 const AppContext = createContext<AppContextValue | undefined>(undefined)
 
-/* ──────────── localStorage helpers ──────────── */
+/* ──────────── localStorage helpers (fallback when Supabase isn't configured) ──────────── */
 
 function readJSON<T>(key: string, fallback: T): T {
   try {
@@ -53,6 +54,188 @@ function readJSON<T>(key: string, fallback: T): T {
 
 function writeJSON(key: string, value: unknown) {
   localStorage.setItem(key, JSON.stringify(value))
+}
+
+/* ──────────── Supabase row <-> app-model mappers ──────────── */
+
+interface RequestRow {
+  id: string
+  title: string
+  student: string
+  student_roll_no: string
+  student_branch: string
+  student_photo: string
+  category: string
+  description: string
+  ai_summary: string
+  generated_letter: string | null
+  status: string
+  current_stage_index: number
+  request_type: string
+  workflow: string[]
+  documents: string[]
+  attachments: AttachmentItem[]
+  comments: ApprovalRequest['comments']
+  timeline: ApprovalRequest['timeline']
+  student_email: string | null
+  assigned_coordinator_id: string | null
+  assigned_coordinator_name: string | null
+  assigned_deputy_hod_id: string | null
+  assigned_deputy_hod_name: string | null
+  assigned_hod_name: string | null
+  urgency: string | null
+  created_at: string
+  updated_at: string
+}
+
+function mapRequestRowToApp(row: RequestRow): ApprovalRequest {
+  return {
+    id: row.id,
+    title: row.title,
+    student: row.student,
+    studentRollNo: row.student_roll_no,
+    studentBranch: row.student_branch,
+    studentPhoto: row.student_photo,
+    category: row.category,
+    description: row.description,
+    aiSummary: row.ai_summary,
+    generatedLetter: row.generated_letter ?? undefined,
+    status: row.status as ApprovalRequest['status'],
+    currentStageIndex: row.current_stage_index,
+    requestType: row.request_type,
+    workflow: row.workflow ?? [],
+    documents: row.documents ?? [],
+    attachments: row.attachments ?? [],
+    comments: row.comments ?? [],
+    timeline: row.timeline ?? [],
+    studentEmail: row.student_email ?? undefined,
+    assignedCoordinatorId: row.assigned_coordinator_id ?? undefined,
+    assignedCoordinatorName: row.assigned_coordinator_name ?? undefined,
+    assignedDeputyHODId: row.assigned_deputy_hod_id ?? undefined,
+    assignedDeputyHODName: row.assigned_deputy_hod_name ?? undefined,
+    assignedHODName: row.assigned_hod_name ?? undefined,
+    urgency: (row.urgency as ApprovalRequest['urgency']) ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function mapAppRequestToRow(request: ApprovalRequest): RequestRow {
+  return {
+    id: request.id,
+    title: request.title,
+    student: request.student,
+    student_roll_no: request.studentRollNo,
+    student_branch: request.studentBranch,
+    student_photo: request.studentPhoto,
+    category: request.category,
+    description: request.description,
+    ai_summary: request.aiSummary,
+    generated_letter: request.generatedLetter ?? null,
+    status: request.status,
+    current_stage_index: request.currentStageIndex,
+    request_type: request.requestType,
+    workflow: request.workflow,
+    documents: request.documents,
+    attachments: request.attachments,
+    comments: request.comments,
+    timeline: request.timeline,
+    student_email: request.studentEmail ?? null,
+    assigned_coordinator_id: request.assignedCoordinatorId ?? null,
+    assigned_coordinator_name: request.assignedCoordinatorName ?? null,
+    assigned_deputy_hod_id: request.assignedDeputyHODId ?? null,
+    assigned_deputy_hod_name: request.assignedDeputyHODName ?? null,
+    assigned_hod_name: request.assignedHODName ?? null,
+    urgency: request.urgency ?? null,
+    created_at: request.createdAt,
+    updated_at: request.updatedAt,
+  }
+}
+
+interface NotificationRow {
+  id: string
+  title: string
+  message: string
+  type: string
+  read: boolean
+  created_at: string
+}
+
+function mapNotificationRowToApp(row: NotificationRow): NotificationItem {
+  return {
+    id: row.id,
+    title: row.title,
+    message: row.message,
+    type: row.type as NotificationItem['type'],
+    read: row.read,
+    createdAt: row.created_at,
+  }
+}
+
+function mapAppNotificationToRow(notification: NotificationItem): NotificationRow {
+  return {
+    id: notification.id,
+    title: notification.title,
+    message: notification.message,
+    type: notification.type,
+    read: notification.read,
+    created_at: notification.createdAt,
+  }
+}
+
+interface UserRow {
+  id: string
+  roll_no: string
+  name: string
+  role: string
+  branch: string | null
+  password: string | null
+  phone: string | null
+  photo: string | null
+  department: string | null
+  year: number | null
+  email: string | null
+  class_coordinator: string | null
+  deputy_hod: string | null
+  first_login: boolean
+}
+
+function mapUserRowToApp(row: UserRow): UserProfile {
+  return {
+    id: row.id,
+    rollNo: row.roll_no,
+    name: row.name,
+    role: row.role as Role,
+    branch: row.branch ?? '',
+    password: row.password ?? '',
+    phone: row.phone ?? '',
+    photo: row.photo ?? '',
+    department: row.department ?? undefined,
+    year: row.year ?? undefined,
+    email: row.email ?? undefined,
+    classCoordinator: row.class_coordinator ?? undefined,
+    deputyHOD: row.deputy_hod ?? undefined,
+    firstLogin: row.first_login,
+  }
+}
+
+function mapAppUserToRow(user: UserProfile): UserRow {
+  return {
+    id: user.id,
+    roll_no: user.rollNo,
+    name: user.name,
+    role: user.role,
+    branch: user.branch ?? null,
+    password: user.password ?? null,
+    phone: user.phone ?? null,
+    photo: user.photo ?? null,
+    department: user.department ?? null,
+    year: user.year ?? null,
+    email: user.email ?? null,
+    class_coordinator: user.classCoordinator ?? null,
+    deputy_hod: user.deputyHOD ?? null,
+    first_login: user.firstLogin,
+  }
 }
 
 /* ──────────── helpers ──────────── */
@@ -106,58 +289,84 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [fallbackRole, setFallbackRole] = useState<Role>('student')
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => readJSON(AUTH_KEY, null))
 
-  /* ── Sync TO localStorage whenever React state changes ── */
-  useEffect(() => { writeJSON(USERS_KEY, users) }, [users])
-  useEffect(() => { writeJSON(REQUESTS_KEY, requests) }, [requests])
-  useEffect(() => { writeJSON(NOTIFICATIONS_KEY, notifications) }, [notifications])
+  /* ── Persist session locally (per-device; login itself is a static check, not Supabase Auth) ── */
   useEffect(() => {
     if (currentUser) writeJSON(AUTH_KEY, currentUser)
     else localStorage.removeItem(AUTH_KEY)
   }, [currentUser])
 
-  /* ── Cross-tab sync: listen for localStorage changes from other tabs ── */
+  /* ══════════════ Supabase mode: shared cross-device data ══════════════ */
+
+  /* ── Initial load from Supabase ── */
   useEffect(() => {
-    const handleStorageEvent = (e: StorageEvent) => {
-      if (e.key === REQUESTS_KEY && e.newValue) {
-        try { setRequests(JSON.parse(e.newValue)) } catch { /* ignore */ }
-      }
-      if (e.key === NOTIFICATIONS_KEY && e.newValue) {
-        try { setNotifications(JSON.parse(e.newValue)) } catch { /* ignore */ }
-      }
-      if (e.key === USERS_KEY && e.newValue) {
-        try { setUsers(JSON.parse(e.newValue)) } catch { /* ignore */ }
-      }
+    if (!isSupabaseConfigured) return
+    let cancelled = false
+    void (async () => {
+      const [requestsRes, notificationsRes, usersRes] = await Promise.all([
+        supabase.from('requests').select('*').order('created_at', { ascending: false }),
+        supabase.from('notifications').select('*').order('created_at', { ascending: false }),
+        supabase.from('users').select('*'),
+      ])
+      if (cancelled) return
+
+      if (requestsRes.error) console.error('[IAN] Failed to load requests from Supabase:', requestsRes.error)
+      else setRequests((requestsRes.data as RequestRow[]).map(mapRequestRowToApp))
+
+      if (notificationsRes.error) console.error('[IAN] Failed to load notifications from Supabase:', notificationsRes.error)
+      else setNotifications((notificationsRes.data as NotificationRow[]).map(mapNotificationRowToApp))
+
+      if (usersRes.error) console.error('[IAN] Failed to load users from Supabase:', usersRes.error)
+      else if (usersRes.data && usersRes.data.length > 0) setUsers((usersRes.data as UserRow[]).map(mapUserRowToApp))
+    })()
+    return () => {
+      cancelled = true
     }
-    window.addEventListener('storage', handleStorageEvent)
-    return () => window.removeEventListener('storage', handleStorageEvent)
   }, [])
 
-  /* ── Same-tab freshness: poll localStorage every 2s to catch writes from
-       the same browsing context (e.g. student submits, then switches to
-       coordinator in the same tab without a full page reload) ── */
+  /* ── Realtime subscriptions: live cross-device updates ── */
   useEffect(() => {
-    const interval = setInterval(() => {
-      const freshRequests = readJSON<ApprovalRequest[]>(REQUESTS_KEY, [])
-      setRequests((prev) => {
-        // Only update if the data actually changed (compare by length + last id)
-        if (prev.length !== freshRequests.length) return freshRequests
-        if (prev.length > 0 && freshRequests.length > 0) {
-          const prevFirst = prev[0]
-          const freshFirst = freshRequests[0]
-          if (prevFirst.id !== freshFirst.id || prevFirst.status !== freshFirst.status || prevFirst.currentStageIndex !== freshFirst.currentStageIndex) {
-            return freshRequests
-          }
-        }
-        return prev
-      })
-    }, 2000)
-    return () => clearInterval(interval)
-  }, [])
+    if (!isSupabaseConfigured) return
 
-  /* ── Force-refresh requests from localStorage on login ── */
-  const refreshFromStorage = useCallback(() => {
-    setRequests(readJSON(REQUESTS_KEY, []))
-    setNotifications(readJSON(NOTIFICATIONS_KEY, initialNotifications))
+    const channel = supabase
+      .channel('ian-live-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, (payload) => {
+        if (payload.eventType === 'DELETE') {
+          const deletedId = (payload.old as { id: string }).id
+          setRequests((prev) => prev.filter((request) => request.id !== deletedId))
+          return
+        }
+        const row = mapRequestRowToApp(payload.new as RequestRow)
+        setRequests((prev) => (prev.some((request) => request.id === row.id)
+          ? prev.map((request) => (request.id === row.id ? row : request))
+          : [row, ...prev]))
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, (payload) => {
+        if (payload.eventType === 'DELETE') {
+          const deletedId = (payload.old as { id: string }).id
+          setNotifications((prev) => prev.filter((notification) => notification.id !== deletedId))
+          return
+        }
+        const row = mapNotificationRowToApp(payload.new as NotificationRow)
+        setNotifications((prev) => (prev.some((notification) => notification.id === row.id)
+          ? prev.map((notification) => (notification.id === row.id ? row : notification))
+          : [row, ...prev]))
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, (payload) => {
+        if (payload.eventType === 'DELETE') {
+          const deletedId = (payload.old as { id: string }).id
+          setUsers((prev) => prev.filter((user) => user.id !== deletedId))
+          return
+        }
+        const row = mapUserRowToApp(payload.new as UserRow)
+        setUsers((prev) => (prev.some((user) => user.id === row.id)
+          ? prev.map((user) => (user.id === row.id ? row : user))
+          : [...prev, row]))
+      })
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
   }, [])
 
   const login = (rollNo: string, password: string) => {
@@ -177,7 +386,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     )
     setCurrentUser(sessionUser)
     setFallbackRole('student')
-    refreshFromStorage()
     return { ok: true, message: 'Login successful.' }
   }
 
@@ -202,7 +410,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     setCurrentUser(officialUser)
     setFallbackRole(account.role)
-    refreshFromStorage()
     return { ok: true, message: 'Login successful.' }
   }
 
@@ -222,78 +429,120 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!user) return { ok: false, message: 'Roll number not found.' }
     if (password.trim().length < 6) return { ok: false, message: 'Password must be at least 6 characters long.' }
 
-    setUsers((prev) => prev.map((item) => item.rollNo === normalizedRoll ? { ...item, password, firstLogin: false } : item))
-
     const updatedUser = { ...user, password, firstLogin: false }
+    setUsers((prev) => prev.map((item) => item.rollNo === normalizedRoll ? updatedUser : item))
     setCurrentUser(updatedUser)
+
+    if (isSupabaseConfigured) {
+      void supabase.from('users').upsert(mapAppUserToRow(updatedUser)).then(({ error }) => {
+        if (error) console.error('[IAN] Failed to persist password change to Supabase:', error)
+      })
+    } else {
+      writeJSON(USERS_KEY, users.map((item) => item.rollNo === normalizedRoll ? updatedUser : item))
+    }
+
     return { ok: true, message: 'Password created successfully.' }
   }
 
-  const addRequest = useCallback((request: ApprovalRequest) => {
-    // Synchronous write FIRST so other sessions/polls pick it up immediately
-    const current = readJSON<ApprovalRequest[]>(REQUESTS_KEY, [])
-    const updated = [request, ...current]
-    writeJSON(REQUESTS_KEY, updated)
+  const addRequest = useCallback(async (request: ApprovalRequest) => {
+    setRequests((prev) => [request, ...prev])
 
-    setRequests(updated)
-    setNotifications((prev) => {
-      const next = [{
-        id: `${Date.now()}`,
-        title: 'Request submitted',
-        message: `${request.title} has been submitted and is now awaiting approval.`,
-        type: 'success' as const,
-        createdAt: new Date().toISOString(),
-        read: false,
-      }, ...prev]
-      writeJSON(NOTIFICATIONS_KEY, next)
-      return next
-    })
+    const notification: NotificationItem = {
+      id: `${Date.now()}`,
+      title: 'Request submitted',
+      message: `${request.title} has been submitted and is now awaiting approval.`,
+      type: 'success',
+      createdAt: new Date().toISOString(),
+      read: false,
+    }
+    setNotifications((prev) => [notification, ...prev])
+
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from('requests').insert(mapAppRequestToRow(request))
+      if (error) {
+        console.error('[IAN] Failed to save request to Supabase:', error)
+        // Roll back the optimistic update — the request never actually made it
+        // to the shared database, so no other device/reviewer will ever see it.
+        setRequests((prev) => prev.filter((item) => item.id !== request.id))
+        setNotifications((prev) => prev.filter((item) => item.id !== notification.id))
+        return {
+          ok: false,
+          message: error.code === '23505'
+            ? 'That request ID is already in use. Please try submitting again.'
+            : 'Failed to submit your request. Please check your connection and try again.',
+        }
+      }
+      void supabase.from('notifications').insert(mapAppNotificationToRow(notification)).then(({ error: notificationError }) => {
+        if (notificationError) console.error('[IAN] Failed to save notification to Supabase:', notificationError)
+      })
+    } else {
+      const currentRequests = readJSON<ApprovalRequest[]>(REQUESTS_KEY, [])
+      writeJSON(REQUESTS_KEY, [request, ...currentRequests])
+      const currentNotifications = readJSON<NotificationItem[]>(NOTIFICATIONS_KEY, [])
+      writeJSON(NOTIFICATIONS_KEY, [notification, ...currentNotifications])
+    }
+
+    return { ok: true }
   }, [])
 
   const updateRequest = useCallback((requestId: string, updater: (request: ApprovalRequest) => ApprovalRequest) => {
-    // Read fresh from localStorage to avoid stale overwrites
-    const current = readJSON<ApprovalRequest[]>(REQUESTS_KEY, [])
-    const updated = current.map((request) => {
-      if (request.id !== requestId) return request
-      const result = updater(request)
-      return result
-    })
-    writeJSON(REQUESTS_KEY, updated)
-    setRequests(updated)
+    const source = isSupabaseConfigured ? requests : readJSON<ApprovalRequest[]>(REQUESTS_KEY, requests)
+    const oldRequest = source.find((request) => request.id === requestId)
+    if (!oldRequest) return
+    const newRequest = updater(oldRequest)
+    const nextRequests = source.map((request) => (request.id === requestId ? newRequest : request))
 
-    // Generate notification
-    const oldReq = current.find((r) => r.id === requestId)
-    const newReq = updated.find((r) => r.id === requestId)
-    if (oldReq && newReq && (oldReq.status !== newReq.status || oldReq.currentStageIndex !== newReq.currentStageIndex)) {
+    setRequests(nextRequests)
+
+    let notification: NotificationItem | null = null
+    if (oldRequest.status !== newRequest.status || oldRequest.currentStageIndex !== newRequest.currentStageIndex) {
       const action =
-        newReq.status === 'Approved' ? 'approved'
-          : newReq.status === 'Rejected' ? 'rejected'
-            : newReq.status === 'Changes Requested' ? 'requested for changes'
-              : newReq.status === 'Waiting for Deputy HOD' ? 'forwarded to Deputy HOD'
-                : newReq.status === 'HOD Review' ? 'forwarded to HOD'
+        newRequest.status === 'Approved' ? 'approved'
+          : newRequest.status === 'Rejected' ? 'rejected'
+            : newRequest.status === 'Changes Requested' ? 'requested for changes'
+              : newRequest.status === 'Waiting for Deputy HOD' ? 'forwarded to Deputy HOD'
+                : newRequest.status === 'HOD Review' ? 'forwarded to HOD'
                   : 'updated'
-      setNotifications((prev) => {
-        const next = [
-          {
-            id: `${Date.now()}-${requestId}`,
-            title: 'Request status updated',
-            message: `${newReq.title} was ${action}.`,
-            type: (newReq.status === 'Rejected' ? 'warning' : 'info') as 'warning' | 'info',
-            createdAt: new Date().toISOString(),
-            read: false,
-          },
-          ...prev,
-        ]
-        writeJSON(NOTIFICATIONS_KEY, next)
-        return next
-      })
+      notification = {
+        id: `${Date.now()}-${requestId}`,
+        title: 'Request status updated',
+        message: `${newRequest.title} was ${action}.`,
+        type: newRequest.status === 'Rejected' ? 'warning' : 'info',
+        createdAt: new Date().toISOString(),
+        read: false,
+      }
+      setNotifications((prev) => [notification as NotificationItem, ...prev])
     }
-  }, [])
+
+    if (isSupabaseConfigured) {
+      void supabase.from('requests').update(mapAppRequestToRow(newRequest)).eq('id', requestId).then(({ error }) => {
+        if (error) console.error('[IAN] Failed to update request in Supabase:', error)
+      })
+      if (notification) {
+        void supabase.from('notifications').insert(mapAppNotificationToRow(notification)).then(({ error }) => {
+          if (error) console.error('[IAN] Failed to save notification to Supabase:', error)
+        })
+      }
+    } else {
+      writeJSON(REQUESTS_KEY, nextRequests)
+      if (notification) {
+        const currentNotifications = readJSON<NotificationItem[]>(NOTIFICATIONS_KEY, [])
+        writeJSON(NOTIFICATIONS_KEY, [notification, ...currentNotifications])
+      }
+    }
+  }, [requests])
 
   const addAttachmentToRequest = (requestId: string, attachment: AttachmentItem) => {
     setRequests((prev) => {
       const next = prev.map((request) => request.id === requestId ? { ...request, attachments: [...request.attachments, attachment] } : request)
-      writeJSON(REQUESTS_KEY, next)
+      const updated = next.find((request) => request.id === requestId)
+      if (isSupabaseConfigured && updated) {
+        void supabase.from('requests').update({ attachments: updated.attachments, documents: updated.documents }).eq('id', requestId).then(({ error }) => {
+          if (error) console.error('[IAN] Failed to save attachment to Supabase:', error)
+        })
+      } else {
+        writeJSON(REQUESTS_KEY, next)
+      }
       return next
     })
   }
@@ -301,7 +550,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeAttachmentFromRequest = (requestId: string, attachmentId: string) => {
     setRequests((prev) => {
       const next = prev.map((request) => request.id === requestId ? { ...request, attachments: request.attachments.filter((attachment) => attachment.id !== attachmentId) } : request)
-      writeJSON(REQUESTS_KEY, next)
+      const updated = next.find((request) => request.id === requestId)
+      if (isSupabaseConfigured && updated) {
+        void supabase.from('requests').update({ attachments: updated.attachments }).eq('id', requestId).then(({ error }) => {
+          if (error) console.error('[IAN] Failed to remove attachment in Supabase:', error)
+        })
+      } else {
+        writeJSON(REQUESTS_KEY, next)
+      }
       return next
     })
   }
@@ -311,19 +567,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!prev) return null
       const updated = { ...prev, ...updates }
       writeJSON(AUTH_KEY, updated)
+      if (isSupabaseConfigured) {
+        void supabase.from('users').upsert(mapAppUserToRow(updated)).then(({ error }) => {
+          if (error) console.error('[IAN] Failed to save profile to Supabase:', error)
+        })
+      }
       return updated
     })
-    setUsers((prevUsers) =>
-      prevUsers.map((u) => (u.id === currentUser?.id ? { ...u, ...updates } : u)),
-    )
+    setUsers((prevUsers) => {
+      const exists = prevUsers.some((item) => item.id === currentUser?.id)
+      const next = exists
+        ? prevUsers.map((item) => (item.id === currentUser?.id ? { ...item, ...updates } : item))
+        : currentUser
+          ? [...prevUsers, { ...currentUser, ...updates }]
+          : prevUsers
+      if (!isSupabaseConfigured) writeJSON(USERS_KEY, next)
+      return next
+    })
   }
 
   const markNotificationRead = (id: string) => {
     setNotifications((prev) => {
       const next = prev.map((notification) => (notification.id === id ? { ...notification, read: true } : notification))
-      writeJSON(NOTIFICATIONS_KEY, next)
+      if (!isSupabaseConfigured) writeJSON(NOTIFICATIONS_KEY, next)
       return next
     })
+    if (isSupabaseConfigured) {
+      void supabase.from('notifications').update({ read: true }).eq('id', id).then(({ error }) => {
+        if (error) console.error('[IAN] Failed to mark notification read in Supabase:', error)
+      })
+    }
   }
 
   const currentRole = currentUser?.role ?? fallbackRole
@@ -359,4 +632,3 @@ export function useAppContext() {
   }
   return context
 }
-

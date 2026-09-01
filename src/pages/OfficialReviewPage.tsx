@@ -25,6 +25,7 @@ export default function OfficialReviewPage() {
   const { requests, updateRequest, currentRole } = useAppContext()
   const request = requests.find((item) => item.id === id)
   const [reason, setReason] = useState('')
+  const [reasonError, setReasonError] = useState(false)
 
   if (!request) {
     return (
@@ -56,8 +57,10 @@ export default function OfficialReviewPage() {
 
   const handleDecision = (decision: 'approve' | 'forward' | 'changes' | 'reject') => {
     if ((decision === 'changes' || decision === 'reject') && !reason.trim()) {
+      setReasonError(true)
       return
     }
+    setReasonError(false)
 
     const updatedRequest = { ...request }
     const now = new Date().toISOString()
@@ -403,7 +406,10 @@ export default function OfficialReviewPage() {
 
               <textarea
                 value={reason}
-                onChange={(event) => setReason(event.target.value)}
+                onChange={(event) => {
+                  setReason(event.target.value)
+                  if (reasonError && event.target.value.trim()) setReasonError(false)
+                }}
                 placeholder={
                   currentRole === 'classCoordinator'
                     ? 'Official remarks (required for changes/reject; optional explanation when forwarding or approving)'
@@ -412,12 +418,20 @@ export default function OfficialReviewPage() {
                       : 'Official remarks (required for changes/reject)'
                 }
                 rows={4}
-                className="w-full rounded-xl border border-white/8 bg-[#0d1015] p-3 text-sm text-zinc-200 outline-none focus:border-violet-500 transition"
+                className={`w-full rounded-xl border bg-[#0d1015] p-3 text-sm text-zinc-200 outline-none transition ${
+                  reasonError ? 'border-rose-500 focus:border-rose-500' : 'border-white/8 focus:border-violet-500'
+                }`}
               />
-              {reason.trim().length === 0 && (
-                <p className="mt-1.5 text-xs text-zinc-400">
-                  A reason is required when requesting changes or rejecting.
+              {reasonError ? (
+                <p className="mt-1.5 text-xs font-medium text-rose-400">
+                  Please enter a reason before requesting changes or rejecting.
                 </p>
+              ) : (
+                reason.trim().length === 0 && (
+                  <p className="mt-1.5 text-xs text-zinc-400">
+                    A reason is required when requesting changes or rejecting.
+                  </p>
+                )
               )}
 
               <div className="mt-5 space-y-2.5">

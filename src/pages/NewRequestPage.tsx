@@ -86,6 +86,8 @@ export default function NewRequestPage() {
   const [isEditingLetter, setIsEditingLetter] = useState(false)
   const [isAiProcessing, setIsAiProcessing] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [uploadError, setUploadError] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -139,21 +141,31 @@ export default function NewRequestPage() {
   }
 
   const requestId = useMemo(() => {
-    return `IAN-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 900) + 100)}`
+    // Derived from the current millisecond rather than a bare 3-digit random
+    // number (100-999): the old range collided often enough to hit Supabase's
+    // primary-key constraint on requests.id within a single academic year.
+    // Two submissions would need to land in the same millisecond to collide.
+    const millisPart = String(Date.now() % 900000 + 100000)
+    return `IAN-${new Date().getFullYear()}-${millisPart}`
   }, [])
 
   const handleSubmit = async () => {
     if (!analysis || !currentUser) return
 
-    const savedAttachments: AttachmentItem[] = []
-    if (selectedFiles.length > 0) {
-      savedAttachments.push(
-        ...(await Promise.all(
-          selectedFiles.map(async (file) =>
-            saveAttachment(file, requestId, currentUser.name),
-          ),
-        )),
-      )
+    setSubmitError('')
+    setIsSubmitting(true)
+
+    let savedAttachments: AttachmentItem[] = []
+    try {
+      if (selectedFiles.length > 0) {
+        savedAttachments = await Promise.all(
+          selectedFiles.map(async (file) => saveAttachment(file, requestId, currentUser.name)),
+        )
+      }
+    } catch {
+      setIsSubmitting(false)
+      setSubmitError('Failed to upload one or more attachments. Please try again.')
+      return
     }
 
     const request: ApprovalRequest = {
@@ -201,7 +213,12 @@ export default function NewRequestPage() {
       studentEmail: currentUser.email,
     }
 
-    addRequest(request)
+    const result = await addRequest(request)
+    setIsSubmitting(false)
+    if (!result.ok) {
+      setSubmitError(result.message ?? 'Failed to submit your request. Please try again.')
+      return
+    }
     setSubmitted(true)
   }
 
@@ -611,12 +628,18 @@ export default function NewRequestPage() {
               </div>
 
               <div className="pt-2">
+                {submitError && (
+                  <p className="mb-2.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300">
+                    {submitError}
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={handleSubmit}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 hover:bg-emerald-500 transition"
+                  disabled={isSubmitting}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 hover:bg-emerald-500 transition disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Send className="h-4 w-4" /> Send to {coordinatorName}
+                  <Send className="h-4 w-4" /> {isSubmitting ? 'Submitting…' : `Send to ${coordinatorName}`}
                 </button>
                 <button
                   type="button"
