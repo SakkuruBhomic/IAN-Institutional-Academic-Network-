@@ -22,8 +22,7 @@ const studentNav = [
 ]
 
 const officialNav = [
-  { key: 'official', label: 'Overview', to: '/official', icon: LayoutDashboard },
-  { key: 'reviews', label: 'Reviews', to: '/official', icon: ClipboardList },
+  { key: 'official', label: 'Dashboard', to: '/official', icon: LayoutDashboard },
   { key: 'workflow-library', label: 'Workflow Library', to: '/admin/workflows', icon: ShieldCheck },
   { key: 'admin', label: 'Admin Console', to: '/admin', icon: ShieldCheck },
 ]

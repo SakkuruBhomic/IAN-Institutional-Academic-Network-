@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -8,7 +9,7 @@ import {
 } from 'react'
 import { authenticateOfficial, type OfficialRole } from '../data/officialAccounts'
 import { authenticateStudent } from '../data/studentAccounts'
-import { initialNotifications, initialRequests, roleConfig, seedUsers } from '../data/mockData'
+import { initialNotifications, roleConfig, seedUsers } from '../data/mockData'
 import type { ApprovalRequest, AttachmentItem, NotificationItem, Role, UserProfile } from '../types'
 
 interface AppContextValue {
@@ -31,54 +32,30 @@ interface AppContextValue {
   roleLabel: string
 }
 
-const USERS_KEY = 'ian-users-v1'
-const REQUESTS_KEY = 'ian-requests-v1'
-const AUTH_KEY = 'ian-auth-v1'
-const NOTIFICATIONS_KEY = 'ian-notifications-v1'
+const USERS_KEY = 'ian-users-v2'
+const REQUESTS_KEY = 'ian-requests-v2'
+const AUTH_KEY = 'ian-auth-v2'
+const NOTIFICATIONS_KEY = 'ian-notifications-v2'
 
 const AppContext = createContext<AppContextValue | undefined>(undefined)
 
-function getStoredUsers() {
-  const stored = localStorage.getItem(USERS_KEY)
-  if (!stored) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(seedUsers))
-    return seedUsers
-  }
+/* ──────────── localStorage helpers ──────────── */
+
+function readJSON<T>(key: string, fallback: T): T {
   try {
-    return JSON.parse(stored) as UserProfile[]
+    const raw = localStorage.getItem(key)
+    if (!raw) return fallback
+    return JSON.parse(raw) as T
   } catch {
-    localStorage.setItem(USERS_KEY, JSON.stringify(seedUsers))
-    return seedUsers
+    return fallback
   }
 }
 
-function getStoredRequests() {
-  const stored = localStorage.getItem(REQUESTS_KEY)
-  if (!stored) {
-    localStorage.setItem(REQUESTS_KEY, JSON.stringify(initialRequests))
-    return initialRequests
-  }
-  try {
-    return JSON.parse(stored) as ApprovalRequest[]
-  } catch {
-    localStorage.setItem(REQUESTS_KEY, JSON.stringify(initialRequests))
-    return initialRequests
-  }
+function writeJSON(key: string, value: unknown) {
+  localStorage.setItem(key, JSON.stringify(value))
 }
 
-function getStoredNotifications() {
-  const stored = localStorage.getItem(NOTIFICATIONS_KEY)
-  if (!stored) {
-    localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(initialNotifications))
-    return initialNotifications
-  }
-  try {
-    return JSON.parse(stored) as NotificationItem[]
-  } catch {
-    localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(initialNotifications))
-    return initialNotifications
-  }
-}
+/* ──────────── helpers ──────────── */
 
 function getBranchShort(department?: string): string {
   if (!department) return 'CSE'
@@ -117,42 +94,71 @@ function buildStudentUser(
   }
 }
 
+/* ═══════════════════════════════════════════════
+   Provider
+   ═══════════════════════════════════════════════ */
+
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [users, setUsers] = useState<UserProfile[]>(() => getStoredUsers())
-  const [requests, setRequests] = useState<ApprovalRequest[]>(() => getStoredRequests())
-  const [notifications, setNotifications] = useState<NotificationItem[]>(() => getStoredNotifications())
+  // Start with EMPTY requests — only real student submissions will appear
+  const [users, setUsers] = useState<UserProfile[]>(() => readJSON(USERS_KEY, seedUsers))
+  const [requests, setRequests] = useState<ApprovalRequest[]>(() => readJSON(REQUESTS_KEY, []))
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => readJSON(NOTIFICATIONS_KEY, initialNotifications))
   const [fallbackRole, setFallbackRole] = useState<Role>('student')
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    const stored = localStorage.getItem(AUTH_KEY)
-    if (!stored) return null
-    try {
-      const parsed = JSON.parse(stored) as UserProfile | null
-      if (!parsed) return null
-      return parsed
-    } catch {
-      return null
-    }
-  })
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => readJSON(AUTH_KEY, null))
 
+  /* ── Sync TO localStorage whenever React state changes ── */
+  useEffect(() => { writeJSON(USERS_KEY, users) }, [users])
+  useEffect(() => { writeJSON(REQUESTS_KEY, requests) }, [requests])
+  useEffect(() => { writeJSON(NOTIFICATIONS_KEY, notifications) }, [notifications])
   useEffect(() => {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users))
-  }, [users])
-
-  useEffect(() => {
-    localStorage.setItem(REQUESTS_KEY, JSON.stringify(requests))
-  }, [requests])
-
-  useEffect(() => {
-    localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(notifications))
-  }, [notifications])
-
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem(AUTH_KEY, JSON.stringify(currentUser))
-    } else {
-      localStorage.removeItem(AUTH_KEY)
-    }
+    if (currentUser) writeJSON(AUTH_KEY, currentUser)
+    else localStorage.removeItem(AUTH_KEY)
   }, [currentUser])
+
+  /* ── Cross-tab sync: listen for localStorage changes from other tabs ── */
+  useEffect(() => {
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (e.key === REQUESTS_KEY && e.newValue) {
+        try { setRequests(JSON.parse(e.newValue)) } catch { /* ignore */ }
+      }
+      if (e.key === NOTIFICATIONS_KEY && e.newValue) {
+        try { setNotifications(JSON.parse(e.newValue)) } catch { /* ignore */ }
+      }
+      if (e.key === USERS_KEY && e.newValue) {
+        try { setUsers(JSON.parse(e.newValue)) } catch { /* ignore */ }
+      }
+    }
+    window.addEventListener('storage', handleStorageEvent)
+    return () => window.removeEventListener('storage', handleStorageEvent)
+  }, [])
+
+  /* ── Same-tab freshness: poll localStorage every 2s to catch writes from
+       the same browsing context (e.g. student submits, then switches to
+       coordinator in the same tab without a full page reload) ── */
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const freshRequests = readJSON<ApprovalRequest[]>(REQUESTS_KEY, [])
+      setRequests((prev) => {
+        // Only update if the data actually changed (compare by length + last id)
+        if (prev.length !== freshRequests.length) return freshRequests
+        if (prev.length > 0 && freshRequests.length > 0) {
+          const prevFirst = prev[0]
+          const freshFirst = freshRequests[0]
+          if (prevFirst.id !== freshFirst.id || prevFirst.status !== freshFirst.status || prevFirst.currentStageIndex !== freshFirst.currentStageIndex) {
+            return freshRequests
+          }
+        }
+        return prev
+      })
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [])
+
+  /* ── Force-refresh requests from localStorage on login ── */
+  const refreshFromStorage = useCallback(() => {
+    setRequests(readJSON(REQUESTS_KEY, []))
+    setNotifications(readJSON(NOTIFICATIONS_KEY, initialNotifications))
+  }, [])
 
   const login = (rollNo: string, password: string) => {
     const student = authenticateStudent(rollNo, password)
@@ -171,6 +177,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     )
     setCurrentUser(sessionUser)
     setFallbackRole('student')
+    refreshFromStorage()
     return { ok: true, message: 'Login successful.' }
   }
 
@@ -195,6 +202,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     setCurrentUser(officialUser)
     setFallbackRole(account.role)
+    refreshFromStorage()
     return { ok: true, message: 'Login successful.' }
   }
 
@@ -221,63 +229,88 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return { ok: true, message: 'Password created successfully.' }
   }
 
-  const addRequest = (request: ApprovalRequest) => {
-    setRequests((prev) => [request, ...prev])
-    setNotifications((prev) => [{
-      id: `${Date.now()}`,
-      title: 'Request submitted',
-      message: `${request.title} has been submitted and is now awaiting approval.`,
-      type: 'success',
-      createdAt: new Date().toISOString(),
-      read: false,
-    }, ...prev])
-  }
+  const addRequest = useCallback((request: ApprovalRequest) => {
+    // Synchronous write FIRST so other sessions/polls pick it up immediately
+    const current = readJSON<ApprovalRequest[]>(REQUESTS_KEY, [])
+    const updated = [request, ...current]
+    writeJSON(REQUESTS_KEY, updated)
 
-  const updateRequest = (requestId: string, updater: (request: ApprovalRequest) => ApprovalRequest) => {
-    setRequests((prev) => prev.map((request) => {
+    setRequests(updated)
+    setNotifications((prev) => {
+      const next = [{
+        id: `${Date.now()}`,
+        title: 'Request submitted',
+        message: `${request.title} has been submitted and is now awaiting approval.`,
+        type: 'success' as const,
+        createdAt: new Date().toISOString(),
+        read: false,
+      }, ...prev]
+      writeJSON(NOTIFICATIONS_KEY, next)
+      return next
+    })
+  }, [])
+
+  const updateRequest = useCallback((requestId: string, updater: (request: ApprovalRequest) => ApprovalRequest) => {
+    // Read fresh from localStorage to avoid stale overwrites
+    const current = readJSON<ApprovalRequest[]>(REQUESTS_KEY, [])
+    const updated = current.map((request) => {
       if (request.id !== requestId) return request
-      const updated = updater(request)
-      if (updated.status === request.status && updated.currentStageIndex === request.currentStageIndex) return updated
+      const result = updater(request)
+      return result
+    })
+    writeJSON(REQUESTS_KEY, updated)
+    setRequests(updated)
+
+    // Generate notification
+    const oldReq = current.find((r) => r.id === requestId)
+    const newReq = updated.find((r) => r.id === requestId)
+    if (oldReq && newReq && (oldReq.status !== newReq.status || oldReq.currentStageIndex !== newReq.currentStageIndex)) {
       const action =
-        updated.status === 'Approved'
-          ? 'approved'
-          : updated.status === 'Rejected'
-            ? 'rejected'
-            : updated.status === 'Changes Requested'
-              ? 'requested for changes'
-              : updated.status === 'Waiting for Deputy HOD'
-                ? 'forwarded to Deputy HOD'
-                : updated.status === 'HOD Review'
-                  ? 'forwarded to HOD'
+        newReq.status === 'Approved' ? 'approved'
+          : newReq.status === 'Rejected' ? 'rejected'
+            : newReq.status === 'Changes Requested' ? 'requested for changes'
+              : newReq.status === 'Waiting for Deputy HOD' ? 'forwarded to Deputy HOD'
+                : newReq.status === 'HOD Review' ? 'forwarded to HOD'
                   : 'updated'
-      setNotifications((notificationsPrev) => [
-        {
-          id: `${Date.now()}-${requestId}`,
-          title: 'Request status updated',
-          message: `${updated.title} was ${action}.`,
-          type: updated.status === 'Rejected' ? 'warning' : 'info',
-          createdAt: new Date().toISOString(),
-          read: false,
-        },
-        ...notificationsPrev,
-      ])
-      return updated
-    }))
-  }
+      setNotifications((prev) => {
+        const next = [
+          {
+            id: `${Date.now()}-${requestId}`,
+            title: 'Request status updated',
+            message: `${newReq.title} was ${action}.`,
+            type: (newReq.status === 'Rejected' ? 'warning' : 'info') as 'warning' | 'info',
+            createdAt: new Date().toISOString(),
+            read: false,
+          },
+          ...prev,
+        ]
+        writeJSON(NOTIFICATIONS_KEY, next)
+        return next
+      })
+    }
+  }, [])
 
   const addAttachmentToRequest = (requestId: string, attachment: AttachmentItem) => {
-    setRequests((prev) => prev.map((request) => request.id === requestId ? { ...request, attachments: [...request.attachments, attachment] } : request))
+    setRequests((prev) => {
+      const next = prev.map((request) => request.id === requestId ? { ...request, attachments: [...request.attachments, attachment] } : request)
+      writeJSON(REQUESTS_KEY, next)
+      return next
+    })
   }
 
   const removeAttachmentFromRequest = (requestId: string, attachmentId: string) => {
-    setRequests((prev) => prev.map((request) => request.id === requestId ? { ...request, attachments: request.attachments.filter((attachment) => attachment.id !== attachmentId) } : request))
+    setRequests((prev) => {
+      const next = prev.map((request) => request.id === requestId ? { ...request, attachments: request.attachments.filter((attachment) => attachment.id !== attachmentId) } : request)
+      writeJSON(REQUESTS_KEY, next)
+      return next
+    })
   }
 
   const updateUserProfile = (updates: Partial<UserProfile>) => {
     setCurrentUser((prev) => {
       if (!prev) return null
       const updated = { ...prev, ...updates }
-      localStorage.setItem(AUTH_KEY, JSON.stringify(updated))
+      writeJSON(AUTH_KEY, updated)
       return updated
     })
     setUsers((prevUsers) =>
@@ -286,7 +319,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   const markNotificationRead = (id: string) => {
-    setNotifications((prev) => prev.map((notification) => (notification.id === id ? { ...notification, read: true } : notification)))
+    setNotifications((prev) => {
+      const next = prev.map((notification) => (notification.id === id ? { ...notification, read: true } : notification))
+      writeJSON(NOTIFICATIONS_KEY, next)
+      return next
+    })
   }
 
   const currentRole = currentUser?.role ?? fallbackRole
@@ -309,7 +346,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     removeAttachmentFromRequest,
     markNotificationRead,
     roleLabel: roleConfig[currentRole]?.label ?? 'Student',
-  }), [currentRole, currentUser, notifications, requests, users])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [currentRole, currentUser, notifications, requests, users, addRequest, updateRequest])
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }

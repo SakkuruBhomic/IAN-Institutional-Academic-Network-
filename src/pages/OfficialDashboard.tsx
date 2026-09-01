@@ -28,12 +28,17 @@ export default function OfficialDashboard() {
 
   // Requests specifically waiting for this official's review
   const pendingForMe = useMemo(() => {
+    const myUsername = currentUser?.rollNo ?? '' // For officials, rollNo = username (e.g. 'coordinator_cse_a')
+
     return requests
       .filter((request) => {
+        // Skip finalized requests
         if (request.status === 'Approved' || request.status === 'Rejected') return false
+
+        // Admin sees everything pending
         if (currentRole === 'admin') return true
 
-        // If Class Coordinator:
+        // Class Coordinator: show requests at coordinator stage that are assigned to THIS coordinator
         if (currentRole === 'classCoordinator') {
           const isCoordinatorStage =
             request.currentStageIndex === 1 ||
@@ -41,19 +46,33 @@ export default function OfficialDashboard() {
             request.status === 'Submitted' ||
             request.workflow[request.currentStageIndex] === 'Class Coordinator'
 
-          return isCoordinatorStage
+          if (!isCoordinatorStage) return false
+
+          // If the request has an assigned coordinator, only show if it's THIS coordinator
+          if (request.assignedCoordinatorId) {
+            return request.assignedCoordinatorId === myUsername
+          }
+          // Fallback: show all coordinator-stage requests (for legacy/demo data)
+          return true
         }
 
-        // If Deputy HOD:
+        // Deputy HOD: show requests forwarded to deputy HOD stage
         if (currentRole === 'deputyHOD') {
-          return (
+          const isDeputyStage =
             request.status === 'Waiting for Deputy HOD' ||
             request.currentStageIndex === 2 ||
             request.workflow[request.currentStageIndex] === 'Deputy HOD'
-          )
+
+          if (!isDeputyStage) return false
+
+          // If assigned, only show if assigned to THIS deputy HOD
+          if (request.assignedDeputyHODId) {
+            return request.assignedDeputyHODId === myUsername
+          }
+          return true
         }
 
-        // If HOD:
+        // HOD: show requests escalated to HOD stage
         if (currentRole === 'HOD') {
           return (
             request.status === 'HOD Review' ||
@@ -64,18 +83,7 @@ export default function OfficialDashboard() {
 
         return request.workflow[request.currentStageIndex] === workflowRole
       })
-      .sort((a, b) => {
-        // Prioritize requests specifically assigned to this coordinator/official at the top
-        const aIsMine =
-          a.assignedCoordinatorId === currentUser?.rollNo ||
-          a.assignedCoordinatorName === currentUser?.name
-        const bIsMine =
-          b.assignedCoordinatorId === currentUser?.rollNo ||
-          b.assignedCoordinatorName === currentUser?.name
-        if (aIsMine && !bIsMine) return -1
-        if (!aIsMine && bIsMine) return 1
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      })
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   }, [requests, currentRole, currentUser, workflowRole])
 
   // Department requests
