@@ -1,0 +1,193 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+@import 'tailwindcss';
+
+:root {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  color-scheme: dark;
+  --app-bg: #07090d;
+  --app-wrapper: #0b0d11;
+  --app-sidebar: #0d1015;
+  --app-header: rgba(11, 13, 17, 0.85);
+  --app-card: #12151b;
+  --app-card-inner: #0d1015;
+  --text-primary: #ffffff;
+  --text-secondary: #d4d4d8;
+  --text-muted: #a1a1aa;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --accent-color: #8b5cf6;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+  --app-bg: #f8fafc;
+  --app-wrapper: #ffffff;
+  --app-sidebar: #f1f5f9;
+  --app-header: rgba(255, 255, 255, 0.9);
+  --app-card: #ffffff;
+  --app-card-inner: #f8fafc;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --border-color: rgba(15, 23, 42, 0.1);
+  --accent-color: #7c3aed;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background-color: var(--app-bg);
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: var(--app-bg);
+  color: var(--text-primary);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Dynamic theme helpers */
+.app-container {
+  background-color: var(--app-bg);
+}
+
+.app-wrapper {
+  background-color: var(--app-wrapper);
+  border-color: var(--border-color);
+}
+
+.app-sidebar {
+  background-color: var(--app-sidebar);
+  border-color: var(--border-color);
+}
+
+.app-header {
+  background-color: var(--app-header);
+  border-color: var(--border-color);
+}
+
+.app-card {
+  background-color: var(--app-card);
+  border-color: var(--border-color);
+}
+
+.app-card-inner {
+  background-color: var(--app-card-inner);
+  border-color: var(--border-color);
+}
+
+.app-title {
+  color: var(--text-primary);
+}
+
+.app-text-primary {
+  color: var(--text-primary);
+}
+
+/* Light Mode Overrides for Hardcoded Dark Utility Classes */
+html[data-theme='light'] .bg-\[\#07090d\] {
+  background-color: #f8fafc !important;
+}
+
+html[data-theme='light'] .bg-\[\#0b0d11\] {
+  background-color: #ffffff !important;
+}
+
+html[data-theme='light'] .bg-\[\#0d1015\] {
+  background-color: #f1f5f9 !important;
+}
+
+html[data-theme='light'] .bg-\[\#12151b\] {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05) !important;
+}
+
+html[data-theme='light'] .bg-\[\#141820\],
+html[data-theme='light'] .bg-\[\#181c24\] {
+  background-color: #e2e8f0 !important;
+}
+
+html[data-theme='light'] .border-white\/8,
+html[data-theme='light'] .border-white\/6,
+html[data-theme='light'] .border-white\/10,
+html[data-theme='light'] .border-white\/12 {
+  border-color: #e2e8f0 !important;
+}
+
+html[data-theme='light'] .text-white {
+  color: #0f172a !important;
+}
+
+html[data-theme='light'] .text-zinc-100,
+html[data-theme='light'] .text-zinc-200 {
+  color: #1e293b !important;
+}
+
+html[data-theme='light'] .text-zinc-300 {
+  color: #334155 !important;
+}
+
+html[data-theme='light'] .text-zinc-400 {
+  color: #64748b !important;
+}
+
+html[data-theme='light'] .text-zinc-500 {
+  color: #94a3b8 !important;
+}
+
+html[data-theme='light'] textarea,
+html[data-theme='light'] input {
+  color: #0f172a !important;
+}
+
+html[data-theme='light'] ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+html[data-theme='light'] ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border: 2px solid #f1f5f9;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: 'Space Grotesk', 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #07090d;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
